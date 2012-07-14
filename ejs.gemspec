@@ -1,6 +1,8 @@
 Gem::Specification.new do |s|
   s.name = "ejs"
   s.version = "1.1.2"
+  s.platform = "java"
+  
   s.summary = "EJS (Embedded JavaScript) template compiler"
   s.description = "Compile and evaluate EJS (Embedded JavaScript) templates from Ruby."
 
