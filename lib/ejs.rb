@@ -1,19 +1,18 @@
+require 'stringio'
 # EJS (Embedded JavaScript) template compiler for Ruby
 # This is a port of Underscore.js' `_.template` function:
 # http://documentcloud.github.com/underscore/
 
 module EJS
-  JS_UNESCAPES = {
+  JS_ESCAPES = {
     '\\' => '\\',
     "'" => "'",
-    'r' => "\r",
-    'n' => "\n",
-    't' => "\t",
-    'u2028' => "\u2028",
-    'u2029' => "\u2029"
+    "\r" => "r",
+    "\t" => "t",
+    "\u2028" => "u2028",
+    "\u2029" => "u2029"
   }
-  JS_ESCAPES = JS_UNESCAPES.invert
-  JS_UNESCAPE_PATTERN = /\\(#{Regexp.union(JS_UNESCAPES.keys)})/
+
   JS_ESCAPE_PATTERN = Regexp.union(JS_ESCAPES.keys)
 
   class << self
@@ -32,14 +31,63 @@ module EJS
     #     # => "function(obj){...}"
     #
     def compile(source, options = {})
-      source = source.dup
 
-      js_escape!(source)
-      replace_escape_tags!(source, options)
-      replace_interpolation_tags!(source, options)
-      replace_evaluation_tags!(source, options)
-      "function(obj){var __p=[],print=function(){__p.push.apply(__p,arguments);};" +
-        "with(obj||{}){__p.push('#{source}');}return __p.join('');}"
+      next_matches = [{
+          :name => "escape",
+          :re => (options[:escape_pattern] || escape_pattern)
+        },{
+          :name => "interpolate",
+          :re => (options[:interpolation_pattern] || interpolation_pattern)
+        },{
+          :name => "evaluate",
+          :re => options[:evaluation_pattern] || evaluation_pattern
+        }]
+      
+      compiled_str = StringIO.new
+      compiled_str << "function(obj){var __p=[],print=function(){__p.push.apply(__p,arguments);};"
+      compiled_str << "with(obj||{}){__p.push('"
+
+      refresh_matches = Proc.new do |start|
+        next_matches.each do |matcher|
+          #only re-evaluate if we may have passed this matcher through a higher-priority one.
+          next if matcher[:begin].to_i > start
+
+          if match = source[start..-1].match(matcher[:re])
+            matcher[:begin] = match.begin(0) + start
+            matcher[:end] = match.end(0) + start
+            matcher[:match] = match[1]
+          else
+            matcher[:begin] = -1
+          end
+        end
+
+        #remove crufty matchers
+        next_matches.reject!{|matcher| matcher[:begin].nil? || matcher[:begin] == -1}
+      end
+
+      refresh_matches.call(0)
+
+      idx = 0
+      while(idx < source.length && next_matches.length > 0) do
+        next_match = next_matches.min_by{|v| v[:begin] }
+        compiled_str << js_escape!(source[idx, next_match[:begin]-idx].to_s)
+
+        case next_match[:name]
+        when "escape":
+          compiled_str << "',(''+#{next_match[:match]})#{escape_function},'"
+        when "interpolate":
+          compiled_str << "', #{next_match[:match]},'"
+        when "evaluate":
+          compiled_str << "'); #{next_match[:match]}; __p.push('"
+        end
+ 
+        idx = next_match[:end]
+        refresh_matches.call(idx)
+      end
+
+      compiled_str << js_escape!(source[idx..-1]) << "');}return __p.join('');}"
+
+      return compiled_str.string
     end
 
     # Evaluates an EJS template with the given local variables and
@@ -59,30 +107,8 @@ module EJS
     protected
       def js_escape!(source)
         source.gsub!(JS_ESCAPE_PATTERN) { |match| '\\' + JS_ESCAPES[match] }
+        source.gsub!("\n", "\\n',\n'")
         source
-      end
-
-      def js_unescape!(source)
-        source.gsub!(JS_UNESCAPE_PATTERN) { |match| JS_UNESCAPES[match[1..-1]] }
-        source
-      end
-
-      def replace_escape_tags!(source, options)
-        source.gsub!(options[:escape_pattern] || escape_pattern) do
-          "',(''+#{js_unescape!($1)})#{escape_function},'"
-        end
-      end
-
-      def replace_evaluation_tags!(source, options)
-        source.gsub!(options[:evaluation_pattern] || evaluation_pattern) do
-          "'); #{js_unescape!($1)}; __p.push('"
-        end
-      end
-
-      def replace_interpolation_tags!(source, options)
-        source.gsub!(options[:interpolation_pattern] || interpolation_pattern) do
-          "', #{js_unescape!($1)},'"
-        end
       end
 
       def escape_function

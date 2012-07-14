@@ -1,3 +1,12 @@
+== FORK!!!
+
+This is a fork of EJS in an effort to preserve line endings.
+
+All of the same tests pass, which is pretty cool.
+
+Unfortunately, the code got complicated and a little longer.  I should probably factor it better, but it works and it is just a hairy 100 LOC, so..
+
+
 EJS (Embedded JavaScript) template compiler for Ruby
 ====================================================
 
